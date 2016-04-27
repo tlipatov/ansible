@@ -99,6 +99,10 @@ class CallbackBase:
         if not keep_invocation and self._display.verbosity < 3 and 'invocation' in result:
             del abridged_result['invocation']
 
+        # remove diff information from screen output
+        if self._display.verbosity < 3 and 'diff' in result:
+            del abridged_result['diff']
+
         return json.dumps(abridged_result, indent=indent, ensure_ascii=False, sort_keys=sort_keys)
 
     def _handle_warnings(self, res):
@@ -341,15 +345,15 @@ class CallbackBase:
     def v2_playbook_on_include(self, included_file):
         pass #no v1 correspondance
 
-    def v2_playbook_item_on_ok(self, result):
+    def v2_runner_item_on_ok(self, result):
         pass
 
-    def v2_playbook_item_on_failed(self, result):
+    def v2_runner_item_on_failed(self, result):
         pass
 
-    def v2_playbook_item_on_skipped(self, result):
+    def v2_runner_item_on_skipped(self, result):
         pass
 
-    def v2_playbook_retry(self, result):
+    def v2_runner_retry(self, result):
         pass
 

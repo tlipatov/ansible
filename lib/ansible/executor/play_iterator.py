@@ -56,6 +56,7 @@ class HostState:
         self.tasks_child_state  = None
         self.rescue_child_state = None
         self.always_child_state = None
+        self.did_start_at_task  = False
 
     def __repr__(self):
         return "HostState(%r)" % self._blocks
@@ -79,7 +80,7 @@ class HostState:
                         ret.append(states[i])
                 return "|".join(ret)
 
-        return "HOST STATE: block=%d, task=%d, rescue=%d, always=%d, role=%s, run_state=%s, fail_state=%s, pending_setup=%s, tasks child state? %s, rescue child state? %s, always child state? %s" % (
+        return "HOST STATE: block=%d, task=%d, rescue=%d, always=%d, role=%s, run_state=%s, fail_state=%s, pending_setup=%s, tasks child state? %s, rescue child state? %s, always child state? %s, did start at task? %s" % (
             self.cur_block,
             self.cur_regular_task,
             self.cur_rescue_task,
@@ -91,6 +92,7 @@ class HostState:
             self.tasks_child_state,
             self.rescue_child_state,
             self.always_child_state,
+            self.did_start_at_task,
         )
 
     def __eq__(self, other):
@@ -112,14 +114,15 @@ class HostState:
 
     def copy(self):
         new_state = HostState(self._blocks)
-        new_state.cur_block        = self.cur_block
+        new_state.cur_block = self.cur_block
         new_state.cur_regular_task = self.cur_regular_task
-        new_state.cur_rescue_task  = self.cur_rescue_task
-        new_state.cur_always_task  = self.cur_always_task
-        new_state.cur_role         = self.cur_role
-        new_state.run_state        = self.run_state
-        new_state.fail_state       = self.fail_state
-        new_state.pending_setup    = self.pending_setup
+        new_state.cur_rescue_task = self.cur_rescue_task
+        new_state.cur_always_task = self.cur_always_task
+        new_state.cur_role = self.cur_role
+        new_state.run_state = self.run_state
+        new_state.fail_state = self.fail_state
+        new_state.pending_setup = self.pending_setup
+        new_state.did_start_at_task = self.did_start_at_task
         if self.cur_dep_chain is not None:
             new_state.cur_dep_chain = self.cur_dep_chain[:]
         if self.tasks_child_state is not None:
@@ -151,11 +154,20 @@ class PlayIterator:
         self._play = play
         self._blocks = []
 
+        # Default options to gather
+        gather_subset = C.DEFAULT_GATHER_SUBSET
+
+        # Retrieve subset to gather
+        if self._play.gather_subset is not None:
+            gather_subset = self._play.gather_subset
+
         setup_block = Block(play=self._play)
         setup_task = Task(block=setup_block)
         setup_task.action = 'setup'
         setup_task.tags   = ['always']
-        setup_task.args   = {}
+        setup_task.args   = {
+          'gather_subset': gather_subset,
+        }
         setup_task.set_loader(self._play._loader)
         setup_block.block = [setup_task]
 
@@ -190,7 +202,9 @@ class PlayIterator:
                         self.get_next_task_for_host(host)
 
                 # finally, reset the host's state to ITERATING_SETUP
-                self._host_states[host.name].run_state = self.ITERATING_SETUP
+                if start_at_matched:
+                    self._host_states[host.name].did_start_at_task = True
+                    self._host_states[host.name].run_state = self.ITERATING_SETUP
 
         if start_at_matched:
             # we have our match, so clear the start_at_task field on the
@@ -291,12 +305,13 @@ class PlayIterator:
                     # the run state to ITERATING_TASKS
                     state.pending_setup = False
 
-                    state.cur_block += 1
-                    state.cur_regular_task = 0
-                    state.cur_rescue_task  = 0
-                    state.cur_always_task  = 0
                     state.run_state = self.ITERATING_TASKS
-                    state.child_state = None
+                    if not state.did_start_at_task:
+                        state.cur_block += 1
+                        state.cur_regular_task = 0
+                        state.cur_rescue_task  = 0
+                        state.cur_always_task  = 0
+                        state.child_state = None
 
             elif state.run_state == self.ITERATING_TASKS:
                 # clear the pending setup flag, since we're past that and it didn't fail
@@ -307,14 +322,14 @@ class PlayIterator:
                 # have one recurse into it for the next task. If we're done with the child
                 # state, we clear it and drop back to geting the next task from the list.
                 if state.tasks_child_state:
-                    if state.tasks_child_state.fail_state != self.FAILED_NONE:
+                    (state.tasks_child_state, task) = self._get_next_task_from_state(state.tasks_child_state, host=host, peek=peek)
+                    if self._check_failed_state(state.tasks_child_state):
                         # failed child state, so clear it and move into the rescue portion
                         state.tasks_child_state = None
                         state.fail_state |= self.FAILED_TASKS
                         state.run_state = self.ITERATING_RESCUE
                     else:
                         # get the next task recursively
-                        (state.tasks_child_state, task) = self._get_next_task_from_state(state.tasks_child_state, host=host, peek=peek)
                         if task is None or state.tasks_child_state.run_state == self.ITERATING_COMPLETE:
                             # we're done with the child state, so clear it and continue
                             # back to the top of the loop to get the next task
@@ -347,13 +362,13 @@ class PlayIterator:
                 # The process here is identical to ITERATING_TASKS, except instead
                 # we move into the always portion of the block.
                 if state.rescue_child_state:
-                    if state.rescue_child_state.fail_state != self.FAILED_NONE:
+                    (state.rescue_child_state, task) = self._get_next_task_from_state(state.rescue_child_state, host=host, peek=peek)
+                    if self._check_failed_state(state.rescue_child_state):
                         state.rescue_child_state = None
                         state.fail_state |= self.FAILED_RESCUE
                         state.run_state = self.ITERATING_ALWAYS
                     else:
-                        (state.rescue_child_state, task) = self._get_next_task_from_state(state.rescue_child_state, host=host, peek=peek)
-                        if task is None:
+                        if task is None or state.rescue_child_state.run_state == self.ITERATING_COMPLETE:
                             state.rescue_child_state = None
                             continue
                 else:
@@ -378,13 +393,13 @@ class PlayIterator:
                 # run state to ITERATING_COMPLETE in the event of any errors, or when we
                 # have hit the end of the list of blocks.
                 if state.always_child_state:
-                    if state.always_child_state.fail_state != self.FAILED_NONE:
+                    (state.always_child_state, task) = self._get_next_task_from_state(state.always_child_state, host=host, peek=peek)
+                    if self._check_failed_state(state.always_child_state):
                         state.always_child_state = None
                         state.fail_state |= self.FAILED_ALWAYS
                         state.run_state = self.ITERATING_COMPLETE
                     else:
-                        (state.always_child_state, task) = self._get_next_task_from_state(state.always_child_state, host=host, peek=peek)
-                        if task is None:
+                        if task is None or state.always_child_state.run_state == self.ITERATING_COMPLETE:
                             state.always_child_state = None
                 else:
                     if state.cur_always_task >= len(block.always):

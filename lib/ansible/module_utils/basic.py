@@ -27,25 +27,13 @@
 # USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-# == BEGIN DYNAMICALLY INSERTED CODE ==
-
-ANSIBLE_VERSION = "<<ANSIBLE_VERSION>>"
-
-MODULE_ARGS = "<<INCLUDE_ANSIBLE_MODULE_ARGS>>"
-MODULE_COMPLEX_ARGS = "<<INCLUDE_ANSIBLE_MODULE_COMPLEX_ARGS>>"
-
 BOOLEANS_TRUE = ['yes', 'on', '1', 'true', 1, True]
 BOOLEANS_FALSE = ['no', 'off', '0', 'false', 0, False]
 BOOLEANS = BOOLEANS_TRUE + BOOLEANS_FALSE
 
-SELINUX_SPECIAL_FS="<<SELINUX_SPECIAL_FILESYSTEMS>>"
-
 # ansible modules can be written in any language.  To simplify
-# development of Python modules, the functions available here
-# can be inserted in any module source automatically by including
-# #<<INCLUDE_ANSIBLE_MODULE_COMMON>> on a blank line by itself inside
-# of an ansible module. The source of this common code lives
-# in ansible/executor/module_common.py
+# development of Python modules, the functions available here can
+# be used to do many common tasks
 
 import locale
 import os
@@ -231,6 +219,16 @@ except ImportError:
 
 _literal_eval = literal_eval
 
+from ansible import __version__
+# Backwards compat. New code should just import and use __version__
+ANSIBLE_VERSION = __version__
+
+# Internal global holding passed in params and constants.  This is consulted
+# in case multiple AnsibleModules are created.  Otherwise each AnsibleModule
+# would attempt to read from stdin.  Other code should not use this directly
+# as it is an internal implementation detail
+_ANSIBLE_ARGS = None
+
 FILE_COMMON_ARGUMENTS=dict(
     src = dict(),
     mode = dict(type='raw'),
@@ -311,6 +309,26 @@ def get_distribution_version():
         distribution_version = None
     return distribution_version
 
+def get_all_subclasses(cls):
+    '''
+    used by modules like Hardware or Network fact classes to retrieve all subclasses of a given class.
+    __subclasses__ return only direct sub classes. This one go down into the class tree.
+    '''
+    # Retrieve direct subclasses
+    subclasses = cls.__subclasses__()
+    to_visit = list(subclasses)
+    # Then visit all subclasses
+    while to_visit:
+        for sc in to_visit:
+            # The current class is now visited, so remove it from list
+            to_visit.remove(sc)
+            # Appending all subclasses to visit and keep a reference of available class
+            for ssc in sc.__subclasses__():
+                subclasses.append(ssc)
+                to_visit.append(ssc)
+    return subclasses
+
+
 def load_platform_subclass(cls, *args, **kwargs):
     '''
     used by modules like User to have different implementations based on detected platform.  See User
@@ -323,11 +341,11 @@ def load_platform_subclass(cls, *args, **kwargs):
 
     # get the most specific superclass for this platform
     if distribution is not None:
-        for sc in cls.__subclasses__():
+        for sc in get_all_subclasses(cls):
             if sc.distribution is not None and sc.distribution == distribution and sc.platform == this_platform:
                 subclass = sc
     if subclass is None:
-        for sc in cls.__subclasses__():
+        for sc in get_all_subclasses(cls):
             if sc.platform == this_platform and sc.distribution is None:
                 subclass = sc
     if subclass is None:
@@ -507,6 +525,18 @@ def is_executable(path):
             or stat.S_IXOTH & os.stat(path)[stat.ST_MODE])
 
 
+class AnsibleFallbackNotFound(Exception):
+    pass
+
+def env_fallback(*args, **kwargs):
+    ''' Load value from environment '''
+    for arg in args:
+        if arg in os.environ:
+            return os.environ[arg]
+    else:
+        raise AnsibleFallbackNotFound
+
+
 class AnsibleModule(object):
     def __init__(self, argument_spec, bypass_checks=False, no_log=False,
         check_invalid_arguments=True, mutually_exclusive=None, required_together=None,
@@ -539,14 +569,15 @@ class AnsibleModule(object):
                 if k not in self.argument_spec:
                     self.argument_spec[k] = v
 
-        self.params = self._load_params()
+        self._load_params()
+        self._set_fallbacks()
 
         # append to legal_inputs and then possibly check against them
         try:
             self.aliases = self._handle_aliases()
         except Exception:
             e = get_exception()
-            # use exceptions here cause its not safe to call vail json until no_log is processed
+            # Use exceptions here because it isn't safe to call fail_json until no_log is processed
             print('{"failed": true, "msg": "Module alias error: %s"}' % str(e))
             sys.exit(1)
 
@@ -754,7 +785,7 @@ class AnsibleModule(object):
             (device, mount_point, fstype, options, rest) = line.split(' ', 4)
 
             if path_mount_point == mount_point:
-                for fs in SELINUX_SPECIAL_FS.split(','):
+                for fs in self.constants['SELINUX_SPECIAL_FS']:
                     if fs in fstype:
                         special_context = self.selinux_context(path_mount_point)
                         return (True, special_context)
@@ -1263,11 +1294,7 @@ class AnsibleModule(object):
                 return (str, None)
             return str
         try:
-            result = None
-            if not locals:
-                result = literal_eval(str)
-            else:
-                result = literal_eval(str, None, locals)
+            result = literal_eval(str)
             if include_exceptions:
                 return (result, None)
             else:
@@ -1391,6 +1418,8 @@ class AnsibleModule(object):
                 wanted = 'str'
 
             value = self.params[k]
+            if value is None:
+                continue
 
             try:
                 type_checker = self._CHECK_ARGUMENT_TYPES_DISPATCHER[wanted]
@@ -1413,17 +1442,73 @@ class AnsibleModule(object):
                 if k not in self.params:
                     self.params[k] = default
 
+    def _set_fallbacks(self):
+        for k,v in self.argument_spec.items():
+            fallback = v.get('fallback', (None,))
+            fallback_strategy = fallback[0]
+            fallback_args = []
+            fallback_kwargs = {}
+            if k not in self.params and fallback_strategy is not None:
+                for item in fallback[1:]:
+                    if isinstance(item, dict):
+                        fallback_kwargs = item
+                    else:
+                        fallback_args = item
+                try:
+                    self.params[k] = fallback_strategy(*fallback_args, **fallback_kwargs)
+                except AnsibleFallbackNotFound:
+                    continue
+
     def _load_params(self):
-        ''' read the input and return a dictionary and the arguments string '''
-        params = json_dict_unicode_to_bytes(json.loads(MODULE_COMPLEX_ARGS))
-        if params is None:
-            params = dict()
-        return params
+        ''' read the input and set the params attribute.  Sets the constants as well.'''
+        # debug overrides to read args from file or cmdline
+
+        global _ANSIBLE_ARGS
+        if _ANSIBLE_ARGS is not None:
+            buffer = _ANSIBLE_ARGS
+        else:
+            # Avoid tracebacks when locale is non-utf8
+            # We control the args and we pass them as utf8
+            if len(sys.argv) > 1:
+                if os.path.isfile(sys.argv[1]):
+                    fd = open(sys.argv[1], 'rb')
+                    buffer = fd.read()
+                    fd.close()
+                else:
+                    buffer = sys.argv[1]
+                    if sys.version_info >= (3,):
+                        buffer = buffer.encode('utf-8', errors='surrogateescape')
+            # default case, read from stdin
+            else:
+                if sys.version_info < (3,):
+                    buffer = sys.stdin.read()
+                else:
+                    buffer = sys.stdin.buffer.read()
+            _ANSIBLE_ARGS = buffer
+
+        try:
+            params = json.loads(buffer.decode('utf-8'))
+        except ValueError:
+            # This helper used too early for fail_json to work.
+            print('{"msg": "Error: Module unable to decode valid JSON on stdin.  Unable to figure out what parameters were passed", "failed": true}')
+            sys.exit(1)
+
+        if sys.version_info < (3,):
+            params = json_dict_unicode_to_bytes(params)
+
+        try:
+            self.params = params['ANSIBLE_MODULE_ARGS']
+            self.constants = params['ANSIBLE_MODULE_CONSTANTS']
+        except KeyError:
+            # This helper used too early for fail_json to work.
+            print('{"msg": "Error: Module unable to locate ANSIBLE_MODULE_ARGS and ANSIBLE_MODULE_CONSTANTS in json data from stdin.  Unable to figure out what parameters were passed", "failed": true}')
+            sys.exit(1)
 
     def _log_to_syslog(self, msg):
         if HAS_SYSLOG:
             module = 'ansible-%s' % os.path.basename(__file__)
-            syslog.openlog(str(module), 0, syslog.LOG_USER)
+            facility = getattr(syslog, self.constants.get('SYSLOG_FACILITY', 'LOG_USER'), syslog.LOG_USER)
+            syslog.openlog(str(module), 0, facility)
             syslog.syslog(syslog.LOG_INFO, msg)
 
     def debug(self, msg):
@@ -1501,9 +1586,9 @@ class AnsibleModule(object):
                 arg_val = str(arg_val)
             elif isinstance(arg_val, unicode):
                 arg_val = arg_val.encode('utf-8')
-            msg.append('%s=%s ' % (arg, arg_val))
+            msg.append('%s=%s' % (arg, arg_val))
         if msg:
-            msg = 'Invoked with %s' % ''.join(msg)
+            msg = 'Invoked with %s' % ' '.join(msg)
         else:
             msg = 'Invoked'
 
@@ -1550,6 +1635,8 @@ class AnsibleModule(object):
             if p not in paths and os.path.exists(p):
                 paths.append(p)
         for d in paths:
+            if not d:
+                continue
             path = os.path.join(d, arg)
             if os.path.exists(path) and is_executable(path):
                 bin_path = path

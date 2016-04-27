@@ -29,7 +29,7 @@ import traceback
 
 from ansible import constants as C
 from ansible.errors import AnsibleError
-from ansible.plugins.connection import ConnectionBase
+from ansible.plugins.connection import ConnectionBase, BUFSIZE
 from ansible.utils.unicode import to_bytes
 
 try:
@@ -38,8 +38,6 @@ except ImportError:
     from ansible.utils.display import Display
     display = Display()
 
-BUFSIZE = 65536
-
 
 class Connection(ConnectionBase):
     ''' Local BSD Jail based connections '''
@@ -47,7 +45,7 @@ class Connection(ConnectionBase):
     transport = 'jail'
     # Pipelining may work.  Someone needs to test by setting this to True and
     # having pipelining=True in their ansible.cfg
-    has_pipelining = False
+    has_pipelining = True
     # Some become_methods may work in v2 (sudo works for other chroot-based
     # plugins while su seems to be failing).  If some work, check chroot.py to
     # see how to disable just some methods.
@@ -96,7 +94,7 @@ class Connection(ConnectionBase):
         ''' connect to the jail; nothing to do here '''
         super(Connection, self)._connect()
         if not self._connected:
-            display.vvv("THIS IS A LOCAL JAIL DIR", host=self.jail)
+            display.vvv(u"ESTABLISH JAIL CONNECTION FOR USER: {0}".format(self._play_context.remote_user), host=self.jail)
             self._connected = True
 
     def _buffered_exec_command(self, cmd, stdin=subprocess.PIPE):
@@ -107,8 +105,16 @@ class Connection(ConnectionBase):
         compared to exec_command() it looses some niceties like being able to
         return the process's exit code immediately.
         '''
-        executable = C.DEFAULT_EXECUTABLE.split()[0] if C.DEFAULT_EXECUTABLE else '/bin/sh'
-        local_cmd = [self.jexec_cmd, self.jail, executable, '-c', cmd]
+
+        local_cmd = [self.jexec_cmd]
+        set_env = ''
+
+        if self._play_context.remote_user is not None:
+            local_cmd += ['-U', self._play_context.remote_user]
+            # update HOME since -U does not update the jail environment
+            set_env = 'HOME=~' + self._play_context.remote_user + ' '
+
+        local_cmd += [self.jail, self._play_context.executable, '-c', set_env + cmd]
 
         display.vvv("EXEC %s" % (local_cmd,), host=self.jail)
         local_cmd = [to_bytes(i, errors='strict') for i in local_cmd]
@@ -120,13 +126,6 @@ class Connection(ConnectionBase):
     def exec_command(self, cmd, in_data=None, sudoable=False):
         ''' run a command on the jail '''
         super(Connection, self).exec_command(cmd, in_data=in_data, sudoable=sudoable)
-
-        # TODO: Check whether we can send the command to stdin via
-        # p.communicate(in_data)
-        # If we can, then we can change this plugin to has_pipelining=True and
-        # remove the error if in_data is given.
-        if in_data:
-            raise AnsibleError("Internal Error: this module does not support optimized module pipelining")
 
         p = self._buffered_exec_command(cmd)
 

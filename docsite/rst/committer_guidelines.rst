@@ -12,7 +12,7 @@ If you abuse the trust and break components and builds, etc., the trust level fa
 Features, High Level Design, and Roadmap
 ========================================
 
-As a core team member, you are an integral part of the team that develops the roadmap. Please be engaged, and push for the features and fixes that you want to see. Also keep in mind that Red Hat, as a company, will commit to certain features, fixes, APIs, etc. for various releases. Red Hat, the company, and the Ansible team must get these committed features (etc.) completed and released as scheduled. Obligations to users, the community, and customers must come first. Because of thse commitments, a feature you want to develop yourself many not get into a release if it impacts a lot of other parts within Ansible.
+As a core team member, you are an integral part of the team that develops the roadmap. Please be engaged, and push for the features and fixes that you want to see. Also keep in mind that Red Hat, as a company, will commit to certain features, fixes, APIs, etc. for various releases. Red Hat, the company, and the Ansible team must get these committed features (etc.) completed and released as scheduled. Obligations to users, the community, and customers must come first. Because of these commitments, a feature you want to develop yourself many not get into a release if it impacts a lot of other parts within Ansible.
 
 Any other new features and changes to high level design should go through the proposal process (TBD), to ensure the community and core team have had a chance to review the idea and approve it. The core team has sole responsibility for merging new features based on proposals.
 
@@ -60,13 +60,26 @@ People
 ======
 Individuals who've been asked to become a part of this group have generally been contributing in significant ways to the Ansible community for some time. Should they agree, they are requested to add their names and GitHub IDs to this file, in the section below, via a pull request. Doing so indicates that these individuals agree to act in the ways that their fellow committers trust that they will act.
 
-* James Cammarata (RedHat/Ansible)
-* Brian Coca (RedHat/Ansible)
-* Matt Davis (RedHat/Ansible)
-* Toshio Kuratomi (RedHat/Ansible)
-* Jason McKerr (RedHat/Ansible)
-* Robyn Bergeron (RedHat/Ansible)
-* Greg DeKoenigsberg (RedHat/Ansible
+* James Cammarata 
+* Brian Coca
+* Matt Davis
+* Toshio Kuratomi
+* Jason McKerr 
+* Robyn Bergeron 
+* Greg DeKoenigsberg
 * Monty Taylor
 * Matt Martz 
-
+* Nate Case
+* James Tanner
+* Peter Sprygada
+* Abhijit Menon-Sen
+* Michael Scherer
+* René Moser
+* David Shrewsbury
+* Sandra Wills
+* Graham Mainwaring
+* Jon Davila
+* Chris Houseknecht
+* Trond Hindenes
+* Jon Hawkesworth
+* Will Thames

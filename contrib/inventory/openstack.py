@@ -55,7 +55,7 @@ import os_client_config
 import shade
 import shade.inventory
 
-CONFIG_FILES = ['/etc/ansible/openstack.yaml']
+CONFIG_FILES = ['/etc/ansible/openstack.yaml', '/etc/ansible/openstack.yml']
 
 
 def get_groups_from_server(server_vars, namegroup=True):
@@ -149,7 +149,7 @@ def get_host_groups_from_cloud(inventory):
             else:
                 for server in servers:
                     append_hostvars(
-                        hostvars, groups, server['id'], servers[0],
+                        hostvars, groups, server['id'], server,
                         namegroup=True)
     groups['_meta'] = {'hostvars': hostvars}
     return groups

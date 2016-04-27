@@ -10,11 +10,13 @@ rm -f /lib/systemd/system/sockets.target.wants/*initctl*; \
 rm -f /lib/systemd/system/basic.target.wants/*; \
 rm -f /lib/systemd/system/anaconda.target.wants/*;
 RUN dnf -y install \
+    acl \
     dbus-python \
     file \
     findutils \
     glibc-common \
     git \
+    iproute \
     make \
     mercurial \
     procps \
@@ -36,6 +38,8 @@ RUN dnf -y install \
     tar \
     unzip \
     which \
+    openssh-clients \
+    openssh-server \
     yum
 RUN localedef --quiet -f ISO-8859-1 -i pt_BR pt_BR
 RUN localedef --quiet -f ISO-8859-1 -i es_MX es_MX
@@ -43,5 +47,10 @@ RUN /usr/bin/sed -i -e 's/^\(Defaults\s*requiretty\)/#--- \1/'  /etc/sudoers
 RUN mkdir /etc/ansible/
 RUN /usr/bin/echo -e '[local]\nlocalhost ansible_connection=local' > /etc/ansible/hosts
 VOLUME /sys/fs/cgroup /run /tmp
+RUN ssh-keygen -q -t dsa -N '' -f /etc/ssh/ssh_host_dsa_key && \
+    ssh-keygen -q -t rsa -N '' -f /etc/ssh/ssh_host_rsa_key && \
+    ssh-keygen -q -t rsa -N '' -f /root/.ssh/id_rsa && \
+    cp /root/.ssh/id_rsa.pub /root/.ssh/authorized_keys && \
+    for key in /etc/ssh/ssh_host_*_key.pub; do echo "localhost $(cat ${key})" >> /root/.ssh/known_hosts; done
 ENV container=docker
 CMD ["/usr/sbin/init"]

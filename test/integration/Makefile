@@ -23,10 +23,13 @@ VAULT_PASSWORD_FILE = vault-password
 CONSUL_RUNNING := $(shell python consul_running.py)
 EUID := $(shell id -u -r)
 
-all: setup test_test_infra parsing test_var_precedence unicode test_templating_settings environment non_destructive destructive includes blocks pull check_mode test_hash test_handlers test_group_by test_vault test_tags test_lookup_paths no_log test_connection
+all: setup test_test_infra parsing test_var_precedence unicode test_templating_settings environment test_connection non_destructive destructive includes blocks pull check_mode test_hash test_handlers test_group_by test_vault test_tags test_lookup_paths no_log test_gathering_facts
 
 test_test_infra:
-	[ "$$(ansible-playbook -i $(INVENTORY) test_test_infra.yml -e @$(VARS_FILE) $(CREDENTIALS_ARG) $(TEST_FLAGS) | fgrep works | xargs)" = "msg: fail works (True) msg: assert works (True)" ]
+	# ensure fail/assert work locally and can stop execution with non-zero exit code
+	PB_OUT=$$(ansible-playbook -i inventory.local test_test_infra.yml) ; APB_RC=$$? ; echo "$$PB_OUT" ; echo "rc was $$APB_RC (must be non-zero)" ; [ $$APB_RC -ne 0 ] ; echo "ensure playbook output shows assert/fail works (True)" ; echo "$$PB_OUT" | grep "fail works (True)" || exit 1 ; echo "$$PB_OUT" | fgrep "assert works (True)" || exit 1
+	# ensure we work using all specified test args, overridden inventory, etc
+	PB_OUT=$$(ansible-playbook -i $(INVENTORY) test_test_infra.yml -e @$(VARS_FILE) $(CREDENTIALS_ARG) $(TEST_FLAGS)) ; APB_RC=$$? ; echo "$$PB_OUT" ; echo "rc was $$APB_RC (must be non-zero)" ; [ $$APB_RC -ne 0 ] ; echo "ensure playbook output shows assert/fail works (True)" ; echo "$$PB_OUT" | grep "fail works (True)" || exit 1 ; echo "$$PB_OUT" | fgrep "assert works (True)" || exit 1
 
 setup:
 	rm -rf $(TEST_DIR)
@@ -70,23 +73,41 @@ unicode: setup
 test_templating_settings: setup
 	ansible-playbook test_templating_settings.yml -i $(INVENTORY) -e outputdir=$(TEST_DIR) -e @$(VARS_FILE) $(CREDENTIALS_ARG) -v $(TEST_FLAGS)
 
+test_gathering_facts: setup
+	ansible-playbook test_gathering_facts.yml -i $(INVENTORY) -e outputdir=$(TEST_DIR) -e @$(VARS_FILE) -v $(TEST_FLAGS)
+
 environment: setup
 	ansible-playbook test_environment.yml -i $(INVENTORY) -e outputdir=$(TEST_DIR) -e @$(VARS_FILE) $(CREDENTIALS_ARG) $(TEST_FLAGS)
 
 non_destructive: setup
 	ansible-playbook non_destructive.yml -i $(INVENTORY) -e outputdir=$(TEST_DIR) -e @$(VARS_FILE) $(CREDENTIALS_ARG) -v $(TEST_FLAGS)
 
+# For our Docker images, which identify themselves with "ENV container=docker", use the test_docker inventory group.
+# Otherwise use the test_default inventory group, which runs fewer tests, but should work on any system.
+ifeq ($(container),docker)
+TEST_CONNECTION_FILTER := 'test_docker'
+else
+TEST_CONNECTION_FILTER := 'test_default'
+endif
+
 # Skip connection plugins which require root when not running as root.
 ifneq ($(EUID),0)
-TEST_CONNECTION_FILTER := !chroot
+TEST_CONNECTION_FILTER += !chroot
 endif
 
 # Connection plugin test command to repeat with each locale setting.
-TEST_CONNECTION_CMD = $(1) ansible-playbook test_connection.yml -i test_connection.inventory -l '!skip-during-build $(TEST_CONNECTION_FILTER)' $(TEST_FLAGS)
+TEST_CONNECTION_CMD = $(1) ansible-playbook test_connection.yml -i test_connection.inventory -l '$(TEST_CONNECTION_FILTER)' $(TEST_FLAGS)
 
 test_connection: setup
 	$(call TEST_CONNECTION_CMD)
 	$(call TEST_CONNECTION_CMD, LC_ALL=C LANG=C)
+
+# Connection plugin test command to repeat with each locale setting. WinRM specific version.
+TEST_CONNECTION_WINRM_CMD = $(1) ansible-playbook test_connection_winrm.yml -i inventory.winrm $(TEST_FLAGS)
+
+test_connection_winrm: setup
+	$(call TEST_CONNECTION_WINRM_CMD)
+	$(call TEST_CONNECTION_WINRM_CMD, LC_ALL=C LANG=C)
 
 destructive: setup
 	ansible-playbook destructive.yml -i $(INVENTORY) -e outputdir=$(TEST_DIR) -e @$(VARS_FILE) $(CREDENTIALS_ARG) -v $(TEST_FLAGS)
@@ -116,17 +137,17 @@ test_handlers:
 	[ "$$(ansible-playbook test_force_handlers.yml --force-handlers --tags force_false_in_play -i inventory.handlers -e @$(VARS_FILE) $(CREDENTIALS_ARG) -v $(TEST_FLAGS) | egrep -o CALLED_HANDLER_. | sort | uniq | xargs)" = "CALLED_HANDLER_B" ]
 
 test_hash:
-	ANSIBLE_HASH_BEHAVIOUR=replace ansible-playbook test_hash.yml -i $(INVENTORY) $(CREDENTIALS_ARG) -v -e '{"test_hash":{"extra_args":"this is an extra arg"}}'
-	ANSIBLE_HASH_BEHAVIOUR=merge ansible-playbook test_hash.yml -i $(INVENTORY) $(CREDENTIALS_ARG) -v -e '{"test_hash":{"extra_args":"this is an extra arg"}}'
+	ANSIBLE_HASH_BEHAVIOUR=replace ansible-playbook test_hash.yml -i $(INVENTORY) $(CREDENTIALS_ARG) -v $(TEST_FLAGS) -e '{"test_hash":{"extra_args":"this is an extra arg"}}'
+	ANSIBLE_HASH_BEHAVIOUR=merge ansible-playbook test_hash.yml -i $(INVENTORY) $(CREDENTIALS_ARG) -v $(TEST_FLAGS) -e '{"test_hash":{"extra_args":"this is an extra arg"}}'
 
 test_var_precedence: setup
 	ansible-playbook test_var_precedence.yml -i $(INVENTORY) $(CREDENTIALS_ARG) $(TEST_FLAGS) -v -e outputdir=$(TEST_DIR) -e 'extra_var=extra_var' -e 'extra_var_override=extra_var_override'
 
 test_vault: setup
-	ansible-playbook test_vault.yml -i $(INVENTORY) $(CREDENTIALS_ARG) -v $(TEST_FLAGS) --vault-password-file $(VAULT_PASSWORD_FILE) --list-tasks -e outputdir=$(TEST_DIR)
-	ansible-playbook test_vault.yml -i $(INVENTORY) $(CREDENTIALS_ARG) -v $(TEST_FLAGS) --vault-password-file $(VAULT_PASSWORD_FILE) --list-hosts -e outputdir=$(TEST_DIR)
-	ansible-playbook test_vault.yml -i $(INVENTORY) $(CREDENTIALS_ARG) -v $(TEST_FLAGS) --vault-password-file $(VAULT_PASSWORD_FILE) --syntax-check -e outputdir=$(TEST_DIR)
-	ansible-playbook test_vault.yml -i $(INVENTORY) $(CREDENTIALS_ARG) -v $(TEST_FLAGS) --vault-password-file $(VAULT_PASSWORD_FILE) -e outputdir=$(TEST_DIR)
+	ansible-playbook test_vault.yml -i $(INVENTORY) $(CREDENTIALS_ARG) -v $(TEST_FLAGS) --vault-password-file $(VAULT_PASSWORD_FILE) --list-tasks -e outputdir=$(TEST_DIR) -e @$(VARS_FILE)
+	ansible-playbook test_vault.yml -i $(INVENTORY) $(CREDENTIALS_ARG) -v $(TEST_FLAGS) --vault-password-file $(VAULT_PASSWORD_FILE) --list-hosts -e outputdir=$(TEST_DIR)  -e @$(VARS_FILE)
+	ansible-playbook test_vault.yml -i $(INVENTORY) $(CREDENTIALS_ARG) -v $(TEST_FLAGS) --vault-password-file $(VAULT_PASSWORD_FILE) --syntax-check -e outputdir=$(TEST_DIR)  -e @$(VARS_FILE)
+	ansible-playbook test_vault.yml -i $(INVENTORY) $(CREDENTIALS_ARG) -v $(TEST_FLAGS) --vault-password-file $(VAULT_PASSWORD_FILE) -e outputdir=$(TEST_DIR) -e @$(VARS_FILE)
 
 # test_delegate_to does not work unless we have permission to ssh to localhost.
 # Would take some more effort on our test systems to implement that -- probably
@@ -210,6 +231,11 @@ rackspace: $(CREDENTIALS_FILE)
 
 cloudstack:
 	ansible-playbook cloudstack.yml -i $(INVENTORY) -e @$(VARS_FILE) -e "resource_prefix=$(CLOUD_RESOURCE_PREFIX)" -v $(TEST_FLAGS) ; \
+	RC=$$? ; \
+	exit $$RC;
+
+cloudflare: $(CREDENTIALS_FILE)
+	ansible-playbook cloudflare.yml -i $(INVENTORY) -e @$(VARS_FILE) -e @$(CREDENTIALS_FILE) -e "resource_prefix=$(CLOUD_RESOURCE_PREFIX)" -v $(TEST_FLAGS) ; \
 	RC=$$? ; \
 	exit $$RC;
 

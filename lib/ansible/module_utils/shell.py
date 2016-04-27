@@ -106,7 +106,7 @@ class Shell(object):
                     key_filename=key_filename, allow_agent=allow_agent)
 
         self.shell = self.ssh.invoke_shell()
-        self.shell.settimeout(10)
+        self.shell.settimeout(timeout)
 
         if self.kickstart:
             self.shell.sendall("\n")
@@ -146,7 +146,7 @@ class Shell(object):
                 cmd = '%s\r' % str(command)
                 self.shell.sendall(cmd)
                 responses.append(self.receive(command))
-        except socket.timeout, exc:
+        except socket.timeout:
             raise ShellError("timeout trying to send command", cmd)
         return responses
 
@@ -177,11 +177,10 @@ class Shell(object):
     def read(self, response):
         for regex in self.errors:
             if regex.search(response):
-                raise ShellError('%s' % response)
+                raise ShellError('matched error in response: %s' % response)
 
         for regex in self.prompts:
             match = regex.search(response)
             if match:
                 self._matched_prompt = match.group()
                 return True
-

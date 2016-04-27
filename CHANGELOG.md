@@ -1,18 +1,53 @@
 Ansible Changes By Release
 ==========================
 
-## 2.1 TBD - ACTIVE DEVELOPMENT
+## 2.2 TBD - ACTIVE DEVELOPMENT
+
+## 2.1 "The Song Remains the Same" - ACTIVE DEVELOPMENT
 
 ###Major Changes:
 
-* added facility for modules to send back 'diff' for display when ansible is called with --diff, updated several modules to return this info
-* added ansible-console tool, a REPL shell that allows running adhoc tasks against a chosen inventory (based on  https://github.com/dominis/ansible-shell )
+* Official support for the networking modules, originally available in 2.0 as a tech preview.
+* Refactored and expanded support for Docker with new modules and many improvements to existing modules, as well as a new Kubernetes module.
+* Added new modules for Azure (see below for the full list)
+* Added the ability to specify includes as "static" (either through a configuration option or on a per-include basis). When includes are static,
+  they are loaded at compile time and cannot contain dynamic features like loops.
+* Added a new strategy `debug`, which allows per-task debugging of playbooks.
+* Added a new option for tasks: `loop_control`. This currently only supports one option - `loop_var`, which allows a different loop variable from `item` to be used.
+* Added the ability to filter facts returned by the fact gathering setup step using the `gather_subset` option on the play or in the ansible.cfg configuration file.
+  See http://docs.ansible.com/ansible/intro_configuration.html#gathering for details on the format of the option.
+* Added the ability to send per-item callbacks, rather than a batch update (this more closely resembles the behavior of Ansible 1.x).
+* Added facility for modules to send back 'diff' for display when ansible is called with --diff, updated several modules to return this info
+* Added ansible-console tool, a REPL shell that allows running adhoc tasks against a chosen inventory (based on  https://github.com/dominis/ansible-shell)
+* Added two new variables, which are set when the `rescue` portion of a `block` is started:
+  - `ansible_failed_task`, which contains the serialized version of the failed task.
+  - `ansible_failed_result`, which contains the result of the failed task.
+* New meta action, `meta: clear_host_errors` which will clear any hosts which were marked as failed (but not unreachable hosts).
+* New meta action, `meta: clear_facts` which will remove existing facts for the current host from current memory and facts cache.
+* copy module can now transparently use a vaulted file as source, if vault passwords were provided it will decrypt and copy on the fly.
+* The way new-style python modules (which include all of the non-windows modules shipped with Ansible) are assembled before execution on the remote machine has been changed. The new way stays closer to how python imports modules which will make it easier to write modules which rely heavily on shared code.
+* Reduce the situations in which a module can end up as world readable.  For details, see: https://docs.ansible.com/ansible/become.html#becoming-an-unprivileged-user
+* Re-implemented the retry file feature, which had been left out of 2.0 (fix was backported to 2.0.1 originally).
+* Improved winrm argument validation and feature sniffing (for upcoming pywinrm NTLM support).
+* Improved winrm error handling: basic parsing of stderr from CLIXML stream.
 
 ####New Modules:
 - aws
   * ec2_vol_facts
   * ec2_vpc_dhcp_options
   * ec2_vpc_net_facts
+  * ec2_snapshot_facts
+- azure:
+  * azure_rm_deployment
+  * azure_rm_networkinterface
+  * azure_rm_resourcegroup
+  * azure_rm_securitygroup
+  * azure_rm_storageaccount
+  * azure_rm_storageblob
+  * azure_rm_subnet
+  * azure_rm_virtualmachine
+  * azure_rm_virtualnetwork
+- cloudflare_dns
 - cloudstack
   * cs_cluster
   * cs_configuration
@@ -21,28 +56,175 @@ Ansible Changes By Release
   * cs_resourcelimit
   * cs_volume
   * cs_zone
+  * cs_zone_facts
+- clustering
+  * kubernetes
+- cumulus
+  * cl_bond
+  * cl_bridge
+  * cl_img_install
+  * cl_interface
+  * cl_interface_policy
+  * cl_license
+  * cl_ports
+- eos
+  * eos_command
+  * eos_config
+  * eos_eapi
+  * eos_template
+- gitlab
+  * gitlab_group
+  * gitlab_project
+  * gitlab_user
+- ios
+  * ios_command
+  * ios_config
+  * ios_template
+- iosxr
+  * iosxr_command
+  * iosxr_config
+  * iosxr_template
+- junos
+  * junos_command
+  * junos_config
+  * junos_facts
+  * junos_netconf
+  * junos_package
+  * junos_template
+- make
+- mongodb_parameter
+- nxos
+  * nxos_command
+  * nxos_config
+  * nxos_facts
+  * nxos_feature
+  * nxos_interface
+  * nxos_ip_interface
+  * nxos_nxapi
+  * nxos_ping
+  * nxos_switchport
+  * nxos_template
+  * nxos_vlan
+  * nxos_vrf
+  * nxos_vrf_interface
+  * nxos_vrrp
+- openstack
+  * os_flavor_facts
+  * os_group
+  * os_ironic_inspect
+  * os_keystone_domain_facts
+  * os_keystone_role
+  * os_port_facts
+  * os_project_facts
+  * os_user_facts
+  * os_user_role
+- openswitch
+  * ops_command
+  * ops_config
+  * ops_facts
+  * ops_template
+- softlayer
+  * sl_vm
+- vmware
+  * vmware_maintenancemode
+  * vmware_vm_shell
 - windows
+  * win_acl_inheritance
+  * win_owner
+  * win_reboot
   * win_regmerge
   * win_timezone
 - yum_repository
 
 
+####New Strategies:
+* debug
+
 ####New Filters:
 * extract
+* ip4_hex
+* regex_search
+* regex_findall
 
 ####New Callbacks:
 * actionable (only shows changed and failed)
 * slack
 * json
 
+####New Tests:
+* issubset
+* issuperset
+
 ####New Inventory scripts:
+* brook
 * rackhd
+* azure_rm
 
 ###Minor Changes:
 
-* callbacks now have access to the options with which the CLI was called
-* debug is now controlable with verbosity
-* modules now get verbosity, diff and other flags as passed to ansible
+* Added support for pipelining mode to more connection plugins, which helps prevent 
+  module data from being written to disk.
+* Added a new '!unsafe' YAML decorator, which can be used in playbooks to ensure a
+  string is not templated. For example: `foo: !unsafe "Don't template {{me}}"`.
+* Callbacks now have access to the options with which the CLI was called
+* Debug now has verbosity option to control when to display by matching number of -v in command line
+* Modules now get verbosity, diff and other flags as passed to ansible
+* Mount facts now also show 'network mounts' that use the pattern `<host>:/<mount>`
+* Plugins are now sorted before loading.  This means, for instance, if you want
+  two custom callback plugins to run in a certain order you can name them
+  10-first-callback.py and 20-second-callback.py.
+* Added (alpha) Centirfy's dzdo as another become meethod (privilege escalation)
+
+###Deprecations:
+
+* Deprecated the use of "bare" variables in loops (ie. `with_items: foo`, where `foo` is a variable).
+  The full jinja2 variable syntax of `{{foo}}` should always be used instead. This warning will be removed
+  completely in 2.3, after which time it will be an error.
+
+## 2.0.2 "Over the Hills and Far Away"
+
+* Backport of the 2.1 feature to ensure per-item callbacks are sent as they occur,
+  rather than all at once at the end of the task.
+* Fixed bugs related to the iteration of tasks when certain combinations of roles,
+  blocks, and includes were used, especially when handling errors in rescue/always
+  portions of blocks.
+* Fixed handling of redirects in our helper code, and ported the uri module to use
+  this helper code. This removes the httplib dependency for this module while fixing
+  some bugs related to redirects and SSL certs.
+* Fixed some bugs related to the incorrect creation of extra temp directories for
+  uploading files, which were not cleaned up properly.
+* Improved error reporting in certain situations, to provide more information such as
+  the playbook file/line.
+* Fixed a bug related to the variable precedence of role parameters, especially when
+  a role may be used both as a dependency of a role and directly by itself within the
+  same play.
+* Fixed some bugs in the 2.0 implementation of do/until.
+* Fixed some bugs related to run_once:
+  - Ensure that all hosts are marked as failed if a task marked as run_once fails.
+  - Show a warning when using the free strategy when a run_once task is encountered, as
+    there is no way for the free strategy to guarantee the task is not run more than once.
+* Fixed a bug where the assemble module was not honoring check mode in some situations.
+* Fixed a bug related to delegate_to, where we were incorrectly using variables from
+  the inventory host rather than the delegated-to host.
+* The 'package' meta-module now properly squashes items down to a single execution (as the
+  apt/yum/other package modules do).
+* Fixed a bug related to the ansible-galaxy CLI command dealing with paged results from
+  the Galaxy server.
+* Pipelining support is now available for the local and jail connection plugins, which is
+  useful for users who do not wish to have temp files/directories created when running
+  tasks with these connection types.
+* Improvements in support for additional shell types.
+* Improvements in the code which is used to calculate checksums for remote files.
+* Some speed ups and bug fixes related to the variable merging code.
+* Workaround bug in python subprocess on El Capitan that was making vault fail
+  when attempting to encrypt a file
+* Fix lxc_container module having predictable temp file names and setting file
+  permissions on the temporary file too leniently on a temporary file that was
+  executed as a script.  Addresses CVE-2016-3096
+* Fix a bug in the uri module where setting headers via module params that
+  start with HEADER_ were causing a traceback.
+* Fix bug in the free strategy that was causing it to synchronize its workers
+  after every task (making it a lot more like linear than it should have been).
 
 ## 2.0.1 "Over the Hills and Far Away"
 
@@ -182,7 +364,7 @@ allowed in future versions:
 
 * Rewritten dnf module that should be faster and less prone to encountering bugs in cornercases
 * WinRM connection plugin passes all vars named `ansible_winrm_*` to the underlying pywinrm client. This allows, for instance, `ansible_winrm_server_cert_validation=ignore` to be used with newer versions of pywinrm to disable certificate validation on Python 2.7.9+.
-* WinRM connection plugin put_file is significantly faster and no longer has file size limitations. 
+* WinRM connection plugin put_file is significantly faster and no longer has file size limitations.
 
 ####Deprecated Modules (new ones in parens):
 
@@ -478,6 +660,34 @@ allowed in future versions:
     ```
     - debug: msg="The error message was: {{error_code |default('') }}"
     ```
+
+## 1.9.7 "Dancing in the Street" - TBD
+
+* Fix for lxc_container backport which was broken because it tried to use a feature from ansible-2.x
+
+## 1.9.6 "Dancing in the Street" - Apr 15, 2016
+
+* Fix a regression in the loading of inventory variables where they were not
+  found when placed inside of an inventory directory.
+* Fix lxc_container having predictable temp file names.  Addresses CVE-2016-3096
+
+## 1.9.5 "Dancing In the Street" - Mar 21, 2016
+
+* Compatibility fix with docker 1.8.
+* Fix a bug with the crypttab module omitting certain characters from the name of the device
+* Fix bug with uri module not handling all binary files
+* Fix bug with ini_file not removing options set to an empty string
+* Fix bug with script and raw modules not honoring parameters passed via yaml dict syntax
+* Fix bug with plugin loading finding the wrong modules because the suffix checking was not ordered
+* Fix bug in the literal_eval module code used when we need python-2.4 compat
+* Added --ignore-certs, -c option to ansible-galaxy. Allows ansible-galaxy to work behind a proxy
+  when the proxy fails to forward server certificates.
+* Fixed bug where tasks marked no_log were showing hidden values in output if
+  ansible's --diff option was used.
+* Fix bug with non-english locales in git and apt modules
+* Compatibility fix for using state=absent with the pip ansible module and pip-6.1.0+
+* Backported support for ansible_winrm_server_cert_validation flag to disable cert validation on Python 2.7.9+ (and support for other passthru args to pywinrm transport).
+* Backported various updates to user module (prevent accidental OS X group membership removals, various checkmode fixes).
 
 ## 1.9.4 "Dancing In the Street" - Oct 9, 2015
 
@@ -952,7 +1162,7 @@ New Modules:
   * apache2_module
 - cloud
   * digital_ocean_domain
-  * digital_ocean_sshkey 
+  * digital_ocean_sshkey
   * ec2_asg *(configure autoscaling groups)*
   * ec2_metric_alarm
   * ec2_scaling_policy
@@ -969,7 +1179,7 @@ Other notable changes:
 * libvirt module now supports destroyed and paused as states
 * s3 module can specify metadata
 * security token additions to ec2 modules
-* setup module code moved into module_utils/, facts now accessible by other modules  
+* setup module code moved into module_utils/, facts now accessible by other modules
 * synchronize module sets relative dirs based on inventory or role path
 * misc bugfixes and other parameters
 * the ec2_key module now has wait/wait_timeout parameters
@@ -1018,7 +1228,7 @@ Major features/changes:
 * only_if, which is much older than when_foo and was deprecated, is similarly removed.
 * ssh connection plugin is now more efficient if you add 'pipelining=True' in ansible.cfg under [ssh_connection], see example.cfg
 * localhost/127.0.0.1 is not required to be in inventory if referenced, if not in inventory, it does not implicitly appear in the 'all' group.
-* git module has new parameters (accept_hostkey, key_file, ssh_opts) to ease the usage of git and ssh protocols. 
+* git module has new parameters (accept_hostkey, key_file, ssh_opts) to ease the usage of git and ssh protocols.
 * when using accelerate mode, the daemon will now be restarted when specifying a different remote_user between plays.
 * added no_log: option for tasks. When used, no logging information will be sent to syslog during the module execution.
 * acl module now handles 'default' and allows for either shorthand entry or specific fields per entry section
@@ -1027,7 +1237,7 @@ Major features/changes:
 * all ec2 modules that work with Eucalyptus also now support a 'validate_certs' option, which can be set to 'off' for installations using self-signed certs.
 * Start of new integration test infrastructure (WIP, more details TBD)
 * if repoquery is unavailable, the yum module will automatically attempt to install yum-utils
-* ansible-vault: a framework for encrypting your playbooks and variable files 
+* ansible-vault: a framework for encrypting your playbooks and variable files
 * added support for privilege escalation via 'su' into bin/ansible and bin/ansible-playbook and associated keywords 'su', 'su_user', 'su_pass' for tasks/plays
 
 New modules:
@@ -1172,7 +1382,7 @@ Plugins:
 
 * jail connection module (FreeBSD)
 * lxc connection module
-* added inventory script for listing FreeBSD jails 
+* added inventory script for listing FreeBSD jails
 * added md5 as a Jinja2 filter:  {{ path | md5 }}
 * added a fileglob filter that will return files matching a glob pattern.  with_items: "/foo/pattern/*.txt | fileglob"
 * 'changed' filter returns whether a previous step was changed easier.  when: registered_result | changed
@@ -1187,7 +1397,7 @@ Misc changes (all module additions/fixes may not listed):
 * Added `ansible_env` to the list of facts returned by the setup module.
 * Added `state=touch` to the file module, which functions similarly to the command-line version of `touch`.
 * Added a -vvvv level, which will show SSH client debugging information in the event of a failure.
-* Includes now support the more standard syntax, similar to that of role includes and dependencies. 
+* Includes now support the more standard syntax, similar to that of role includes and dependencies.
 * Changed the `user:` parameter on plays to `remote_user:` to prevent confusion with the module of the same name.  Still backwards compatible on play parameters.
 * Added parameter to allow the fetch module to skip the md5 validation step ('validate_md5=false'). This is useful when fetching files that are actively being written to, such as live log files.
 * Inventory hosts are used in the order they appear in the inventory.
